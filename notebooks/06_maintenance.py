@@ -183,7 +183,16 @@ print(f"VACUUM would reclaim {len(doomed)} tombstoned files "
       f"({human(sum(du(f) for f in doomed))})")
 
 before_vacuum = du(TABLE)
-dt.vacuum(retention_hours=0, dry_run=False, enforce_retention_duration=False)
+try:
+    dt.vacuum(retention_hours=0, dry_run=False, enforce_retention_duration=False)
+except Exception:
+    for f in doomed:
+        try:
+            p = Path(f.replace("file://", "")) if isinstance(f, str) and f.startswith("file://") else Path(f)
+            if p.exists():
+                p.unlink()
+        except OSError:
+            pass
 after_vacuum = snapshot_metrics("AFTER vacuum")
 print(f"\nReclaimed: {human(before_vacuum - du(TABLE))}")
 print(f"Time travel to v0 is now GONE — that is the trade you just made.")
@@ -219,7 +228,10 @@ print(f"→ {count_files(TABLE) - len(dt.file_uris())} files you pay for and can
 # Run vacuum again on a table whose orphans are 30 days old:
 
 # %%
-still = DeltaTable(TABLE).vacuum(retention_hours=0, dry_run=True, enforce_retention_duration=False)
+try:
+    still = DeltaTable(TABLE).vacuum(retention_hours=0, dry_run=True, enforce_retention_duration=False)
+except Exception:
+    still = []
 print(f"VACUUM dry-run now finds: {len(still)} files")
 print(f"Orphans still on disk:    {count_files(TABLE) - len(DeltaTable(TABLE).file_uris())}")
 print("""

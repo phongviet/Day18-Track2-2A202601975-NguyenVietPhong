@@ -86,7 +86,11 @@ def main(n_rows: int = 200_000) -> None:
     df = pl.DataFrame(rows)
     out = path("bronze", "llm_calls_raw")
     reset(out)
-    write_deltalake(out, df.to_arrow(), mode="overwrite")
+    batch_size = 50_000
+    for idx in range(0, len(df), batch_size):
+        batch = df.slice(idx, batch_size)
+        mode = "overwrite" if idx == 0 else "append"
+        write_deltalake(out, batch.to_arrow(), mode=mode)
     n_unique = df.select(pl.col("request_id").n_unique()).item()
     print(
         f"Wrote {n_rows:,} rows → {out}\n"

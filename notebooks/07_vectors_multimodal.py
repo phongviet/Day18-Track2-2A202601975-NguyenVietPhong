@@ -72,7 +72,10 @@ pointer_tbl = pa.table({
 
 INLINE, POINTER = path("scratch", "media_inline"), path("scratch", "media_pointer")
 reset(INLINE, POINTER)
-write_deltalake(INLINE, inline_tbl, mode="overwrite")
+for idx in range(0, inline_tbl.num_rows, 50):
+    batch = inline_tbl.slice(idx, 50)
+    mode = "overwrite" if idx == 0 else "append"
+    write_deltalake(INLINE, batch, mode=mode)
 write_deltalake(POINTER, pointer_tbl, mode="overwrite")
 
 print(f"inline table : {human(du(INLINE)):>10}")
@@ -91,13 +94,14 @@ print("The difference is not SIZE. It is what a reader is forced to touch.")
 # %%
 def column_bytes(table_path: str) -> dict[str, int]:
     """Compressed bytes per column, straight from the Parquet footer."""
-    data_file = next(f for f in Path(table_path).rglob("*.parquet") if "_delta_log" not in f.parts)
-    md = pq.ParquetFile(data_file).metadata
+    data_files = [f for f in Path(table_path).rglob("*.parquet") if "_delta_log" not in f.parts]
     out: dict[str, int] = {}
-    for rg in range(md.num_row_groups):
-        for c in range(md.row_group(rg).num_columns):
-            col = md.row_group(rg).column(c)
-            out[col.path_in_schema] = out.get(col.path_in_schema, 0) + col.total_compressed_size
+    for data_file in data_files:
+        md = pq.ParquetFile(data_file).metadata
+        for rg in range(md.num_row_groups):
+            for c in range(md.row_group(rg).num_columns):
+                col = md.row_group(rg).column(c)
+                out[col.path_in_schema] = out.get(col.path_in_schema, 0) + col.total_compressed_size
     return out
 
 
@@ -127,10 +131,16 @@ print("  Projection pushdown is real. The scary advice is wrong for this case.")
 
 # %%
 def row_group_bytes(table_path: str) -> tuple[int, int, int]:
-    data_file = next(f for f in Path(table_path).rglob("*.parquet") if "_delta_log" not in f.parts)
-    md = pq.ParquetFile(data_file).metadata
-    rg0 = md.row_group(0)
-    return md.num_row_groups, rg0.num_rows, rg0.total_byte_size
+    data_files = [f for f in Path(table_path).rglob("*.parquet") if "_delta_log" not in f.parts]
+    total_rgs = 0
+    rg0_rows, rg0_bytes = 0, 0
+    for i, data_file in enumerate(data_files):
+        md = pq.ParquetFile(data_file).metadata
+        total_rgs += md.num_row_groups
+        if i == 0:
+            rg0 = md.row_group(0)
+            rg0_rows, rg0_bytes = rg0.num_rows, rg0.total_byte_size
+    return total_rgs, rg0_rows, rg0_bytes
 
 
 n_rg, rg_rows, rg_bytes = row_group_bytes(INLINE)
